@@ -16,7 +16,9 @@ async def search(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = " ".join(context.args)
 
     if not query:
-        await update.message.reply_text("Напиши категорию после /search")
+        await update.message.reply_text(
+            "Напиши категорию после /search"
+        )
         return
 
     await update.message.reply_text(
@@ -29,4 +31,5 @@ app.add_handler(CommandHandler("start", start))
 app.add_handler(CommandHandler("search", search))
 
 print("Bot started...")
+
 app.run_polling()

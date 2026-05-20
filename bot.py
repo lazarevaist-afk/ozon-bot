@@ -1,49 +1,47 @@
-import os
-import threading
-from http.server import BaseHTTPRequestHandler, HTTPServer
+import requests
 
-from telegram import Update
-from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
+def search_ozon(query):
+    url = "https://www.ozon.ru/api/entrypoint-api.bx/page/json/v2"
 
-TOKEN = os.getenv("TOKEN")
+    params = {
+        "url": f"/search/?text={query}"
+    }
 
+    headers = {
+        "User-Agent": "Mozilla/5.0",
+        "Accept": "application/json"
+    }
 
-# ---------------- BOT ----------------
+    r = requests.get(url, params=params, headers=headers, timeout=10)
+    data = r.json()
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Бот работает ✅")
+    results = []
 
-async def search(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = " ".join(context.args)
-    await update.message.reply_text(f"Ищу: {query}")
+    try:
+        blocks = data.get("widgetStates", {})
 
+        for key, value in blocks.items():
+            if "searchResultsV2" in key:
+                import json
+                parsed = json.loads(value)
 
-app = ApplicationBuilder().token(TOKEN).build()
-app.add_handler(CommandHandler("start", start))
-app.add_handler(CommandHandler("search", search))
+                items = parsed.get("items", [])
 
+                for item in items:
+                    title = item.get("title")
+                    product_id = item.get("action", {}).get("id")
 
-# ---------------- WEB SERVER (ВАЖНО ДЛЯ RENDER) ----------------
+                    link = f"https://www.ozon.ru/product/{product_id}"
 
-class Handler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        self.send_response(200)
-        self.end_headers()
-        self.wfile.write(b"Bot is running")
+                    seller = item.get("seller", {}).get("name", "не указан")
 
+                    results.append({
+                        "title": title,
+                        "link": link,
+                        "seller": seller
+                    })
 
-def run_web():
-    port = int(os.environ.get("PORT", 10000))
-    server = HTTPServer(("0.0.0.0", port), Handler)
-    server.serve_forever()
+    except Exception:
+        pass
 
-
-# запускаем веб-сервер в фоне
-threading.Thread(target=run_web, daemon=True).start()
-
-
-# ---------------- START BOT ----------------
-
-if __name__ == "__main__":
-    print("Bot started")
-    app.run_polling()
+    return results

@@ -5,12 +5,17 @@ import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 
-# ===== TOKEN =====
+# ==========================
+# TOKEN
+# ==========================
 TOKEN = os.getenv("TOKEN")
 
 
-# ===== COMMAND /start =====
+# ==========================
+# /start
+# ==========================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
     text = """
 Бот поиска продавцов Ozon запущен ✅
 
@@ -26,19 +31,21 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(text)
 
 
-# ===== COMMAND /search =====
+# ==========================
+# /search
+# ==========================
 async def search(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     query = " ".join(context.args)
 
     if not query:
         await update.message.reply_text(
-            "Напиши категорию.\n\nПример:\n/search косметика"
+            "Пример:\n/search косметика"
         )
         return
 
-    result = f"""
-Поиск запущен 🔍
+    response = f"""
+Начинаю поиск в Ozon 🔍
 
 Категория:
 {query}
@@ -52,25 +59,29 @@ async def search(update: Update, context: ContextTypes.DEFAULT_TYPE):
 ✅ искать OEM
 ✅ искать карточки без инфографики
 
-(сейчас работает тестовый режим)
+Статус:
+🟡 тестовый режим
+
+(следующим обновлением подключим реальный сбор результатов)
 """
 
-    await update.message.reply_text(result)
+    await update.message.reply_text(response)
 
 
-# ===== COMMAND /niche =====
+# ==========================
+# /niche
+# ==========================
 async def niche(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
-    niches = """
-Категории для поиска:
+    text = """
+Категории:
 
 🧴 косметика
 🧸 детские товары
 🏠 товары для дома
 🧼 уход
-🕯 свечи
-🧽 бытовые товары
 🧴 уход за волосами
+🕯 свечи
 🎁 подарки
 
 Пример:
@@ -78,10 +89,12 @@ async def niche(update: Update, context: ContextTypes.DEFAULT_TYPE):
 /search косметика
 """
 
-    await update.message.reply_text(niches)
+    await update.message.reply_text(text)
 
 
-# ===== TELEGRAM APP =====
+# ==========================
+# TELEGRAM
+# ==========================
 app = ApplicationBuilder().token(TOKEN).build()
 
 app.add_handler(CommandHandler("start", start))
@@ -89,7 +102,9 @@ app.add_handler(CommandHandler("search", search))
 app.add_handler(CommandHandler("niche", niche))
 
 
-# ===== WEB SERVER FOR RENDER =====
+# ==========================
+# WEB SERVER (Render)
+# ==========================
 def run_web():
 
     port = int(os.environ.get("PORT", 10000))
@@ -97,18 +112,27 @@ def run_web():
     class Handler(BaseHTTPRequestHandler):
 
         def do_GET(self):
+
             self.send_response(200)
             self.end_headers()
-            self.wfile.write(b"Bot is running")
 
-    server = HTTPServer(("0.0.0.0", port), Handler)
+            self.wfile.write(
+                b"Bot is running"
+            )
 
-    print(f"WEB SERVER STARTED {port}")
+    server = HTTPServer(
+        ("0.0.0.0", port),
+        Handler
+    )
+
+    print(f"WEB STARTED {port}")
 
     server.serve_forever()
 
 
-# ===== START =====
+# ==========================
+# START
+# ==========================
 if __name__ == "__main__":
 
     print("BOT STARTED")

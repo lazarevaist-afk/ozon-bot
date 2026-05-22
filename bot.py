@@ -4,10 +4,10 @@ import os
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from playwright.sync_api import sync_playwright
+import json
 
 # ================= TOKEN =================
 TOKEN = os.getenv("TOKEN")
-
 OWNER_ID = 8409916382
 
 
@@ -15,7 +15,7 @@ def allowed(user_id):
     return user_id == OWNER_ID
 
 
-# ================= PLAYWRIGHT SEARCH =================
+# ================= PLAYWRIGHT NETWORK PARSER =================
 def search_ozon_sellers(query: str):
     url = f"https://www.ozon.ru/search/?text={query}"
 
@@ -24,44 +24,67 @@ def search_ozon_sellers(query: str):
 
     try:
         with sync_playwright() as p:
-
             browser = p.chromium.launch(
                 headless=True,
                 args=["--no-sandbox", "--disable-setuid-sandbox"]
             )
 
             page = browser.new_page()
+
+            captured_json = []
+
+            # ловим ответы API
+            def handle_response(response):
+                try:
+                    if "api" in response.url or "composer" in response.url:
+                        body = response.json()
+                        captured_json.append(body)
+                except:
+                    pass
+
+            page.on("response", handle_response)
+
             page.goto(url, timeout=60000)
-
-            page.wait_for_timeout(5000)  # ждём загрузку
-
-            html = page.content()
+            page.wait_for_timeout(7000)
 
             browser.close()
 
-        import re
+        # ================= PARSE CAPTURED DATA =================
+        for data in captured_json:
 
-        # ищем продавцов в отрендеренном DOM
-        blocks = re.findall(r'"seller"\s*:\s*{.*?}', html)
+            try:
+                # ищем items глубоко в JSON
+                if isinstance(data, dict):
 
-        for b in blocks:
-            name = re.search(r'"name"\s*:\s*"([^"]+)"', b)
+                    stack = [data]
 
-            if not name:
+                    while stack:
+                        obj = stack.pop()
+
+                        if isinstance(obj, dict):
+
+                            for k, v in obj.items():
+
+                                if k == "seller" and isinstance(v, dict):
+                                    name = v.get("name")
+
+                                    if name and name not in seen:
+                                        seen.add(name)
+
+                                        sellers.append({
+                                            "seller": name,
+                                            "title": "Ozon product",
+                                            "link": url
+                                        })
+
+                                elif isinstance(v, (dict, list)):
+                                    stack.append(v)
+
+                        elif isinstance(obj, list):
+                            stack.extend(obj)
+
+            except:
                 continue
-
-            seller = name.group(1)
-
-            if seller in seen:
-                continue
-
-            seen.add(seller)
-
-            sellers.append({
-                "seller": seller,
-                "title": "Ozon product",
-                "link": url
-            })
 
             if len(sellers) >= 30:
                 break
@@ -79,7 +102,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Доступ запрещён")
         return
 
-    await update.message.reply_text("Бот готов ✅\n\n/search косметика")
+    await update.message.reply_text("Бот V3 готов ✅\n\n/search косметика")
 
 
 async def search(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -97,7 +120,7 @@ async def search(update: Update, context: ContextTypes.DEFAULT_TYPE):
     sellers = search_ozon_sellers(query)
 
     if not sellers:
-        await update.message.reply_text("Ничего не найдено (или Ozon заблокировал выдачу)")
+        await update.message.reply_text("Ничего не найдено (даже через network API)")
         return
 
     text = f"🔍 Найдено продавцов: {len(sellers)}\n\n"
@@ -108,7 +131,7 @@ async def search(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(text)
 
 
-# ================= RENDER WEB SERVER =================
+# ================= RENDER SERVER =================
 def run_web():
     port = int(os.environ.get("PORT", 10000))
 
@@ -128,9 +151,8 @@ app = ApplicationBuilder().token(TOKEN).build()
 app.add_handler(CommandHandler("start", start))
 app.add_handler(CommandHandler("search", search))
 
-
 if __name__ == "__main__":
-    print("BOT STARTED", flush=True)
+    print("BOT V3 STARTED", flush=True)
 
     threading.Thread(target=run_web, daemon=True).start()
 

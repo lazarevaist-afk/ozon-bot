@@ -8,15 +8,21 @@ def init_db():
     conn = sqlite3.connect(DB)
     c = conn.cursor()
 
+    # пользователи (доступ)
     c.execute("""
     CREATE TABLE IF NOT EXISTS users (
         user_id INTEGER PRIMARY KEY
     )
     """)
 
+    # продавцы / лиды (SAAS-структура)
     c.execute("""
     CREATE TABLE IF NOT EXISTS sellers (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT,
+        title TEXT,
+        link TEXT,
+        query TEXT,
         added_at TEXT
     )
     """)
@@ -24,6 +30,8 @@ def init_db():
     conn.commit()
     conn.close()
 
+
+# ================= USERS =================
 
 def add_user(user_id: int):
     conn = sqlite3.connect(DB)
@@ -42,13 +50,20 @@ def is_allowed(user_id: int) -> bool:
     return res is not None
 
 
-def add_seller(name: str):
+# ================= SELLERS / LEADS =================
+
+def add_seller(name: str, title: str, link: str, query: str):
     conn = sqlite3.connect(DB)
     c = conn.cursor()
+
     c.execute(
-        "INSERT INTO sellers VALUES (?, ?)",
-        (name, datetime.utcnow().isoformat())
+        """
+        INSERT INTO sellers (name, title, link, query, added_at)
+        VALUES (?, ?, ?, ?, ?)
+        """,
+        (name, title, link, query, datetime.utcnow().isoformat())
     )
+
     conn.commit()
     conn.close()
 
@@ -69,3 +84,20 @@ def seller_exists(name: str) -> bool:
             return True
 
     return False
+
+
+def get_sellers(limit: int = 30):
+    conn = sqlite3.connect(DB)
+    c = conn.cursor()
+
+    c.execute("""
+        SELECT name, title, link, query, added_at
+        FROM sellers
+        ORDER BY id DESC
+        LIMIT ?
+    """, (limit,))
+
+    rows = c.fetchall()
+    conn.close()
+
+    return rows

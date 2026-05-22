@@ -3,80 +3,71 @@ from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 import os
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
-from playwright.sync_api import sync_playwright
+import requests
+import json
 
-# ================= CONFIG =================
+# ================= TOKEN =================
 TOKEN = os.getenv("TOKEN")
 OWNER_ID = 8409916382
-
-# 👉 ПРОКСИ (ВСТАВИШЬ СЮДА ПОЗЖЕ)
-PROXY = os.getenv("PROXY")  # пример: http://user:pass@ip:port
 
 
 def allowed(user_id):
     return user_id == OWNER_ID
 
 
-# ================= PLAYWRIGHT =================
+# ================= Ozon stable API parser =================
 def search_ozon_sellers(query: str):
-    url = f"https://www.ozon.ru/search/?text={query}"
+    url = "https://www.ozon.ru/api/entrypoint-api.bx/page/json/v2"
+
+    params = {
+        "url": f"/search/?text={query}"
+    }
+
+    headers = {
+        "User-Agent": "Mozilla/5.0",
+        "Accept": "application/json"
+    }
 
     sellers = []
     seen = set()
 
     try:
-        with sync_playwright() as p:
+        r = requests.get(url, params=params, headers=headers, timeout=15)
+        data = r.json()
 
-            launch_args = {
-                "headless": True,
-                "args": ["--no-sandbox", "--disable-setuid-sandbox"]
-            }
+        blocks = data.get("widgetStates", {})
 
-            # 👉 если есть proxy — подключаем
-            if PROXY:
-                launch_args["proxy"] = {"server": PROXY}
+        for key, value in blocks.items():
 
-            browser = p.chromium.launch(**launch_args)
+            if "searchResultsV2" in key:
+                parsed = json.loads(value)
 
-            context = browser.new_context(
-                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36"
-            )
+                items = parsed.get("items", [])
 
-            page = context.new_page()
-            page.goto(url, timeout=60000)
+                for item in items:
 
-            page.wait_for_timeout(8000)
+                    seller = item.get("seller", {}).get("name")
+                    title = item.get("title")
+                    product_id = item.get("action", {}).get("id")
 
-            html = page.content()
+                    if not seller:
+                        continue
 
-            browser.close()
+                    if seller in seen:
+                        continue
 
-        import re
+                    seen.add(seller)
 
-        # ищем seller блоки
-        blocks = re.findall(r'"seller"\s*:\s*{.*?}', html)
+                    link = f"https://www.ozon.ru/product/{product_id}"
 
-        for b in blocks:
-            name = re.search(r'"name"\s*:\s*"([^"]+)"', b)
+                    sellers.append({
+                        "seller": seller,
+                        "title": title,
+                        "link": link
+                    })
 
-            if not name:
-                continue
-
-            seller = name.group(1)
-
-            if seller in seen:
-                continue
-
-            seen.add(seller)
-
-            sellers.append({
-                "seller": seller,
-                "title": "Ozon product",
-                "link": url
-            })
-
-            if len(sellers) >= 30:
-                break
+                    if len(sellers) >= 30:
+                        return sellers
 
     except Exception as e:
         print("ERROR:", e)
@@ -90,10 +81,11 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Доступ запрещён")
         return
 
-    await update.message.reply_text("V4 бот готов 🔥\n\n/search косметика")
+    await update.message.reply_text("Бот готов ✅\n\n/search косметика")
 
 
 async def search(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
     if not allowed(update.effective_user.id):
         await update.message.reply_text("Нет доступа")
         return
@@ -107,20 +99,18 @@ async def search(update: Update, context: ContextTypes.DEFAULT_TYPE):
     sellers = search_ozon_sellers(query)
 
     if not sellers:
-        await update.message.reply_text(
-            "Пусто ❌ (нужен proxy для стабильной работы Ozon)"
-        )
+        await update.message.reply_text("Ничего не найдено (Ozon ограничил выдачу)")
         return
 
     text = f"🔍 Найдено продавцов: {len(sellers)}\n\n"
 
     for s in sellers:
-        text += f"🏪 {s['seller']}\n🔗 {s['link']}\n\n"
+        text += f"🏪 {s['seller']}\n📦 {s['title']}\n🔗 {s['link']}\n\n"
 
     await update.message.reply_text(text)
 
 
-# ================= WEB SERVER =================
+# ================= WEB SERVER (Render fix) =================
 def run_web():
     port = int(os.environ.get("PORT", 10000))
 
@@ -141,7 +131,7 @@ app.add_handler(CommandHandler("start", start))
 app.add_handler(CommandHandler("search", search))
 
 if __name__ == "__main__":
-    print("BOT V4 STARTED", flush=True)
+    print("BOT STABLE MODE STARTED", flush=True)
 
     threading.Thread(target=run_web, daemon=True).start()
 

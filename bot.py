@@ -4,7 +4,7 @@ import os
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 import requests
-import json
+import re
 
 # ================= TOKEN =================
 TOKEN = os.getenv("TOKEN")
@@ -16,22 +16,17 @@ def allowed(user_id):
     return user_id == OWNER_ID
 
 
-# ================= Ozon parser (FIXED) =================
+# ================= Ozon HTML parser =================
 def search_ozon_sellers(query: str):
-    url = "https://www.ozon.ru/api/composer-api.bx/page/json/v2"
-
-    params = {
-        "url": f"/search/?text={query}"
-    }
+    url = f"https://www.ozon.ru/search/?text={query}"
 
     headers = {
-        "User-Agent": "Mozilla/5.0",
-        "Accept": "application/json"
+        "User-Agent": "Mozilla/5.0"
     }
 
     try:
-        r = requests.get(url, params=params, headers=headers, timeout=10)
-        data = r.json()
+        r = requests.get(url, headers=headers, timeout=15)
+        html = r.text
     except Exception as e:
         print("REQUEST ERROR:", e)
         return []
@@ -40,51 +35,30 @@ def search_ozon_sellers(query: str):
     seen = set()
 
     try:
-        widgets = data.get("widgetStates", {})
+        # ищем блоки продавцов в HTML (грубый, но стабильный вариант)
+        blocks = re.findall(r'"seller"\s*:\s*{.*?}', html)
 
-        for key, value in widgets.items():
+        for b in blocks:
+            name_match = re.search(r'"name"\s*:\s*"([^"]+)"', b)
 
-            if "searchResultsV2" in key or "searchResults" in key:
+            if not name_match:
+                continue
 
-                try:
-                    parsed = json.loads(value)
-                except:
-                    continue
+            seller = name_match.group(1)
 
-                items = parsed.get("items", [])
+            if seller in seen:
+                continue
 
-                for item in items:
+            seen.add(seller)
 
-                    seller = (
-                        item.get("seller", {}).get("name")
-                        or item.get("brand", {}).get("name")
-                    )
+            sellers.append({
+                "seller": seller,
+                "title": "Ozon product",
+                "link": url
+            })
 
-                    title = item.get("title")
-
-                    product_id = (
-                        item.get("action", {}).get("id")
-                        or item.get("id")
-                    )
-
-                    if not seller or not product_id:
-                        continue
-
-                    if seller in seen:
-                        continue
-
-                    seen.add(seller)
-
-                    link = f"https://www.ozon.ru/product/{product_id}"
-
-                    sellers.append({
-                        "seller": seller,
-                        "title": title,
-                        "link": link
-                    })
-
-                    if len(sellers) >= 30:
-                        return sellers
+            if len(sellers) >= 30:
+                break
 
     except Exception as e:
         print("PARSE ERROR:", e)
@@ -117,7 +91,7 @@ async def search(update: Update, context: ContextTypes.DEFAULT_TYPE):
     sellers = search_ozon_sellers(query)
 
     if not sellers:
-        await update.message.reply_text("Ничего не найдено")
+        await update.message.reply_text("Ничего не найдено (Ozon ограничил выдачу)")
         return
 
     text = f"🔍 Найдено продавцов: {len(sellers)}\n\n"
@@ -135,7 +109,7 @@ app.add_handler(CommandHandler("start", start))
 app.add_handler(CommandHandler("search", search))
 
 
-# ================= RENDER PORT FIX =================
+# ================= RENDER WEB SERVER =================
 def run_web():
     port = int(os.environ.get("PORT", 10000))
 

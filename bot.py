@@ -16,9 +16,9 @@ def allowed(user_id):
     return user_id == OWNER_ID
 
 
-# ================= Ozon parser =================
+# ================= Ozon parser (FIXED) =================
 def search_ozon_sellers(query: str):
-    url = "https://www.ozon.ru/api/entrypoint-api.bx/page/json/v2"
+    url = "https://www.ozon.ru/api/composer-api.bx/page/json/v2"
 
     params = {
         "url": f"/search/?text={query}"
@@ -29,27 +29,45 @@ def search_ozon_sellers(query: str):
         "Accept": "application/json"
     }
 
-    r = requests.get(url, params=params, headers=headers, timeout=10)
-    data = r.json()
+    try:
+        r = requests.get(url, params=params, headers=headers, timeout=10)
+        data = r.json()
+    except Exception as e:
+        print("REQUEST ERROR:", e)
+        return []
 
     sellers = []
     seen = set()
 
     try:
-        blocks = data.get("widgetStates", {})
+        widgets = data.get("widgetStates", {})
 
-        for key, value in blocks.items():
-            if "searchResultsV2" in key:
-                parsed = json.loads(value)
+        for key, value in widgets.items():
+
+            if "searchResultsV2" in key or "searchResults" in key:
+
+                try:
+                    parsed = json.loads(value)
+                except:
+                    continue
+
                 items = parsed.get("items", [])
 
                 for item in items:
 
-                    seller = item.get("seller", {}).get("name")
-                    title = item.get("title")
-                    product_id = item.get("action", {}).get("id")
+                    seller = (
+                        item.get("seller", {}).get("name")
+                        or item.get("brand", {}).get("name")
+                    )
 
-                    if not seller:
+                    title = item.get("title")
+
+                    product_id = (
+                        item.get("action", {}).get("id")
+                        or item.get("id")
+                    )
+
+                    if not seller or not product_id:
                         continue
 
                     if seller in seen:
@@ -69,7 +87,7 @@ def search_ozon_sellers(query: str):
                         return sellers
 
     except Exception as e:
-        print("Parse error:", e)
+        print("PARSE ERROR:", e)
 
     return sellers
 

@@ -3,8 +3,7 @@ from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 import os
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
-import requests
-import re
+from playwright.sync_api import sync_playwright
 
 # ================= TOKEN =================
 TOKEN = os.getenv("TOKEN")
@@ -16,35 +15,42 @@ def allowed(user_id):
     return user_id == OWNER_ID
 
 
-# ================= Ozon HTML parser =================
+# ================= PLAYWRIGHT SEARCH =================
 def search_ozon_sellers(query: str):
     url = f"https://www.ozon.ru/search/?text={query}"
-
-    headers = {
-        "User-Agent": "Mozilla/5.0"
-    }
-
-    try:
-        r = requests.get(url, headers=headers, timeout=15)
-        html = r.text
-    except Exception as e:
-        print("REQUEST ERROR:", e)
-        return []
 
     sellers = []
     seen = set()
 
     try:
-        # ищем блоки продавцов в HTML (грубый, но стабильный вариант)
+        with sync_playwright() as p:
+
+            browser = p.chromium.launch(
+                headless=True,
+                args=["--no-sandbox", "--disable-setuid-sandbox"]
+            )
+
+            page = browser.new_page()
+            page.goto(url, timeout=60000)
+
+            page.wait_for_timeout(5000)  # ждём загрузку
+
+            html = page.content()
+
+            browser.close()
+
+        import re
+
+        # ищем продавцов в отрендеренном DOM
         blocks = re.findall(r'"seller"\s*:\s*{.*?}', html)
 
         for b in blocks:
-            name_match = re.search(r'"name"\s*:\s*"([^"]+)"', b)
+            name = re.search(r'"name"\s*:\s*"([^"]+)"', b)
 
-            if not name_match:
+            if not name:
                 continue
 
-            seller = name_match.group(1)
+            seller = name.group(1)
 
             if seller in seen:
                 continue
@@ -61,7 +67,7 @@ def search_ozon_sellers(query: str):
                 break
 
     except Exception as e:
-        print("PARSE ERROR:", e)
+        print("PLAYWRIGHT ERROR:", e)
 
     return sellers
 
@@ -91,7 +97,7 @@ async def search(update: Update, context: ContextTypes.DEFAULT_TYPE):
     sellers = search_ozon_sellers(query)
 
     if not sellers:
-        await update.message.reply_text("Ничего не найдено (Ozon ограничил выдачу)")
+        await update.message.reply_text("Ничего не найдено (или Ozon заблокировал выдачу)")
         return
 
     text = f"🔍 Найдено продавцов: {len(sellers)}\n\n"
@@ -100,13 +106,6 @@ async def search(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text += f"🏪 {s['seller']}\n📦 {s['title']}\n🔗 {s['link']}\n\n"
 
     await update.message.reply_text(text)
-
-
-# ================= BOT =================
-app = ApplicationBuilder().token(TOKEN).build()
-
-app.add_handler(CommandHandler("start", start))
-app.add_handler(CommandHandler("search", search))
 
 
 # ================= RENDER WEB SERVER =================
@@ -124,6 +123,12 @@ def run_web():
 
 
 # ================= START =================
+app = ApplicationBuilder().token(TOKEN).build()
+
+app.add_handler(CommandHandler("start", start))
+app.add_handler(CommandHandler("search", search))
+
+
 if __name__ == "__main__":
     print("BOT STARTED", flush=True)
 

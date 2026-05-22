@@ -4,18 +4,20 @@ import os
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from playwright.sync_api import sync_playwright
-import json
 
-# ================= TOKEN =================
+# ================= CONFIG =================
 TOKEN = os.getenv("TOKEN")
 OWNER_ID = 8409916382
+
+# 👉 ПРОКСИ (ВСТАВИШЬ СЮДА ПОЗЖЕ)
+PROXY = os.getenv("PROXY")  # пример: http://user:pass@ip:port
 
 
 def allowed(user_id):
     return user_id == OWNER_ID
 
 
-# ================= PLAYWRIGHT NETWORK PARSER =================
+# ================= PLAYWRIGHT =================
 def search_ozon_sellers(query: str):
     url = f"https://www.ozon.ru/search/?text={query}"
 
@@ -24,89 +26,74 @@ def search_ozon_sellers(query: str):
 
     try:
         with sync_playwright() as p:
-            browser = p.chromium.launch(
-                headless=True,
-                args=["--no-sandbox", "--disable-setuid-sandbox"]
+
+            launch_args = {
+                "headless": True,
+                "args": ["--no-sandbox", "--disable-setuid-sandbox"]
+            }
+
+            # 👉 если есть proxy — подключаем
+            if PROXY:
+                launch_args["proxy"] = {"server": PROXY}
+
+            browser = p.chromium.launch(**launch_args)
+
+            context = browser.new_context(
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36"
             )
 
-            page = browser.new_page()
-
-            captured_json = []
-
-            # ловим ответы API
-            def handle_response(response):
-                try:
-                    if "api" in response.url or "composer" in response.url:
-                        body = response.json()
-                        captured_json.append(body)
-                except:
-                    pass
-
-            page.on("response", handle_response)
-
+            page = context.new_page()
             page.goto(url, timeout=60000)
-            page.wait_for_timeout(7000)
+
+            page.wait_for_timeout(8000)
+
+            html = page.content()
 
             browser.close()
 
-        # ================= PARSE CAPTURED DATA =================
-        for data in captured_json:
+        import re
 
-            try:
-                # ищем items глубоко в JSON
-                if isinstance(data, dict):
+        # ищем seller блоки
+        blocks = re.findall(r'"seller"\s*:\s*{.*?}', html)
 
-                    stack = [data]
+        for b in blocks:
+            name = re.search(r'"name"\s*:\s*"([^"]+)"', b)
 
-                    while stack:
-                        obj = stack.pop()
-
-                        if isinstance(obj, dict):
-
-                            for k, v in obj.items():
-
-                                if k == "seller" and isinstance(v, dict):
-                                    name = v.get("name")
-
-                                    if name and name not in seen:
-                                        seen.add(name)
-
-                                        sellers.append({
-                                            "seller": name,
-                                            "title": "Ozon product",
-                                            "link": url
-                                        })
-
-                                elif isinstance(v, (dict, list)):
-                                    stack.append(v)
-
-                        elif isinstance(obj, list):
-                            stack.extend(obj)
-
-            except:
+            if not name:
                 continue
+
+            seller = name.group(1)
+
+            if seller in seen:
+                continue
+
+            seen.add(seller)
+
+            sellers.append({
+                "seller": seller,
+                "title": "Ozon product",
+                "link": url
+            })
 
             if len(sellers) >= 30:
                 break
 
     except Exception as e:
-        print("PLAYWRIGHT ERROR:", e)
+        print("ERROR:", e)
 
     return sellers
 
 
 # ================= TELEGRAM =================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
     if not allowed(update.effective_user.id):
         await update.message.reply_text("Доступ запрещён")
         return
 
-    await update.message.reply_text("Бот V3 готов ✅\n\n/search косметика")
+    await update.message.reply_text("V4 бот готов 🔥\n\n/search косметика")
 
 
 async def search(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
     if not allowed(update.effective_user.id):
         await update.message.reply_text("Нет доступа")
         return
@@ -120,18 +107,20 @@ async def search(update: Update, context: ContextTypes.DEFAULT_TYPE):
     sellers = search_ozon_sellers(query)
 
     if not sellers:
-        await update.message.reply_text("Ничего не найдено (даже через network API)")
+        await update.message.reply_text(
+            "Пусто ❌ (нужен proxy для стабильной работы Ozon)"
+        )
         return
 
     text = f"🔍 Найдено продавцов: {len(sellers)}\n\n"
 
     for s in sellers:
-        text += f"🏪 {s['seller']}\n📦 {s['title']}\n🔗 {s['link']}\n\n"
+        text += f"🏪 {s['seller']}\n🔗 {s['link']}\n\n"
 
     await update.message.reply_text(text)
 
 
-# ================= RENDER SERVER =================
+# ================= WEB SERVER =================
 def run_web():
     port = int(os.environ.get("PORT", 10000))
 
@@ -152,7 +141,7 @@ app.add_handler(CommandHandler("start", start))
 app.add_handler(CommandHandler("search", search))
 
 if __name__ == "__main__":
-    print("BOT V3 STARTED", flush=True)
+    print("BOT V4 STARTED", flush=True)
 
     threading.Thread(target=run_web, daemon=True).start()
 
